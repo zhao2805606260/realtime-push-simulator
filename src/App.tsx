@@ -190,7 +190,7 @@ export default function App() {
           </div>
           <div className="map-wrapper">
             <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}>
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
               <DirectMap entities={ea} fps={fpsARef} />
             </MapContainer>
           </div>
@@ -203,7 +203,7 @@ export default function App() {
           </div>
           <div className="map-wrapper">
             <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}>
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
               <OptimizedMap entities={eb} fps={fpsBRef} />
             </MapContainer>
           </div>
