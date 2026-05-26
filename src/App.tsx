@@ -1,295 +1,225 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import './App.css'
 
-// ========== 类型定义 ==========
+// ========== 类型 ==========
 interface Entity {
-  id: number
-  x: number
-  y: number
-  color: string
+  id: number; lat: number; lng: number; heading: number
+  speed: number; icon: string; type: string; targetLat: number; targetLng: number
 }
 
-interface SimulatorRef {
-  start: () => void
-  stop: () => void
+// ========== 军事实体定义 ==========
+const ENTITY_TYPES = [
+  { icon: '🛩️', type: '战斗机', speed: 800 },
+  { icon: '🚁', type: '直升机', speed: 250 },
+  { icon: '🚢', type: '驱逐舰', speed: 30 },
+  { icon: '🚛', type: '装甲车', speed: 70 },
+  { icon: '🎯', type: '导弹', speed: 2500 },
+]
+
+const CENTER: [number, number] = [21.5, 118.5]
+
+function randPos() {
+  return { lat: CENTER[0] + (Math.random() - 0.5) * 4, lng: CENTER[1] + (Math.random() - 0.5) * 5 }
 }
 
-// ========== 模拟推送服务（纯内存，不依赖网络） ==========
-function createSimulator(onPush: (entities: Entity[]) => void, count: number, speed: number): SimulatorRef {
-  let running = false
-  let timer: number | null = null
-  let entities: Entity[] = []
+// ========== 军事实体图标 ==========
+function milIcon(emoji: string) {
+  return L.divIcon({
+    html: `<div style="font-size:22px;transform:translate(-50%,-50%)">${emoji}</div>`,
+    className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+  })
+}
 
-  // 初始化实体
-  const colors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff922b', '#845ef7', '#f06595']
+// ========== 模拟推送 ==========
+function createSim(onPush: (es: Entity[]) => void, count: number, speedMul: number) {
+  let running = false, raf = 0
+  const es: Entity[] = []
   for (let i = 0; i < count; i++) {
-    entities.push({
-      id: i,
-      x: Math.random() * 800,
-      y: Math.random() * 600,
-      color: colors[i % colors.length],
-    })
+    const t = ENTITY_TYPES[i % ENTITY_TYPES.length]; const p = randPos()
+    es.push({ id: i, lat: p.lat, lng: p.lng, heading: 0, speed: t.speed, icon: t.icon, type: t.type, targetLat: randPos().lat, targetLng: randPos().lng })
   }
-
   function tick() {
     if (!running) return
-    // 每 tick 更新一批实体（模拟高频推送）
-    for (let j = 0; j < speed; j++) {
-      for (let i = 0; i < entities.length; i++) {
-        // 随机游走
-        entities[i].x += (Math.random() - 0.5) * 8
-        entities[i].y += (Math.random() - 0.5) * 8
-        // 边界反弹
-        if (entities[i].x < 0) entities[i].x = 0
-        if (entities[i].x > 800) entities[i].x = 800
-        if (entities[i].y < 0) entities[i].y = 0
-        if (entities[i].y > 600) entities[i].y = 600
+    for (let j = 0; j < speedMul; j++) {
+      for (const e of es) {
+        const dLat = e.targetLat - e.lat, dLng = e.targetLng - e.lng
+        const dist = Math.sqrt(dLat * dLat + dLng * dLng)
+        if (dist < 0.01) { const np = randPos(); e.targetLat = np.lat; e.targetLng = np.lng }
+        else {
+          const step = (e.speed * 1.852) / 111 / 3600 * 3
+          const r = Math.min(step / dist, 1)
+          e.lat += dLat * r; e.lng += dLng * r
+          e.heading = (Math.atan2(dLng, dLat) * 180) / Math.PI
+        }
       }
     }
-    // 推送当前所有实体状态
-    onPush(entities.map(e => ({ ...e })))
-    timer = requestAnimationFrame(tick)
+    onPush(es.map(e => ({ ...e })))
+    raf = requestAnimationFrame(tick)
   }
-
   return {
-    start() {
-      running = true
-      timer = requestAnimationFrame(tick)
-    },
-    stop() {
-      running = false
-      if (timer) cancelAnimationFrame(timer)
-    },
+    start() { running = true; raf = requestAnimationFrame(tick) },
+    stop() { running = false; cancelAnimationFrame(raf) },
   }
 }
 
-// ========== Canvas 渲染器 ==========
-function renderEntities(ctx: CanvasRenderingContext2D, entities: Entity[]) {
-  ctx.clearRect(0, 0, 800, 600)
-  for (const e of entities) {
-    ctx.beginPath()
-    ctx.arc(e.x, e.y, 4, 0, Math.PI * 2)
-    ctx.fillStyle = e.color
-    ctx.fill()
-  }
+// ========== FPS ==========
+class FPS { f = 0; private c = 0; private t = performance.now()
+  tick() { this.c++; const n = performance.now(); if (n - this.t >= 1000) { this.f = this.c; this.c = 0; this.t = n } return this.f }
+  reset() { this.f = 0; this.c = 0; this.t = performance.now() }
 }
 
-// ========== FPS 监控 ==========
-class FPSMonitor {
-  private frames = 0
-  private lastTime = performance.now()
-  private fps = 0
+// ========== 直接渲染地图 ==========
+function DirectMap({ entities, fps }: { entities: Entity[]; fps: React.MutableRefObject<FPS> }) {
+  const mapRef = useRef<L.Map | null>(null)
+  const mk = useRef<Map<number, L.Marker>>(new Map())
+  function Init() { const m = useMap(); useEffect(() => { mapRef.current = m }, [m]); return null }
 
-  tick(): number {
-    this.frames++
-    const now = performance.now()
-    if (now - this.lastTime >= 1000) {
-      this.fps = this.frames
-      this.frames = 0
-      this.lastTime = now
-    }
-    return this.fps
-  }
-
-  reset() {
-    this.frames = 0
-    this.lastTime = performance.now()
-    this.fps = 0
-  }
-}
-
-// ========== 主应用 ==========
-export default function App() {
-  const directCanvasRef = useRef<HTMLCanvasElement>(null)
-  const optimizedCanvasRef = useRef<HTMLCanvasElement>(null)
-  const [directFPS, setDirectFPS] = useState(0)
-  const [optimizedFPS, setOptimizedFPS] = useState(0)
-  const [entityCount, setEntityCount] = useState(300)
-  const [pushSpeed, setPushSpeed] = useState(100)
-  const [isRunning, setIsRunning] = useState(false)
-  const [directDataCount, setDirectDataCount] = useState(0)
-  const [optimizedDataCount, setOptimizedDataCount] = useState(0)
-
-  const simA = useRef<SimulatorRef | null>(null)
-  const simB = useRef<SimulatorRef | null>(null)
-  const fpsA = useRef(new FPSMonitor())
-  const fpsB = useRef(new FPSMonitor())
-  const directReceived = useRef(0)
-  const optimizedReceived = useRef(0)
-
-  // WebWorker 模拟：用 Map 缓存 + 16ms 定时推送
-  const workerCache = useRef<Map<number, Entity>>(new Map())
-  const workerEntities = useRef<Entity[]>([])
-  const workerLastFlush = useRef(0)
-
-  const startSimulation = useCallback(() => {
-    if (isRunning) return
-    setIsRunning(true)
-
-    fpsA.current.reset()
-    fpsB.current.reset()
-    directReceived.current = 0
-    optimizedReceived.current = 0
-    workerCache.current.clear()
-    workerEntities.current = []
-
-    // 方案 A：直接渲染（每次推送都渲染）
-    const canvasA = directCanvasRef.current!
-    const ctxA = canvasA.getContext('2d')!
-    simA.current = createSimulator((entities) => {
-      directReceived.current++
-      renderEntities(ctxA, entities)
-      setDirectFPS(fpsA.current.tick())
-      setDirectDataCount(directReceived.current)
-    }, entityCount, pushSpeed)
-
-    // 方案 B：优化渲染（Map 缓存 + rAF 节流）
-    const canvasB = optimizedCanvasRef.current!
-    const ctxB = canvasB.getContext('2d')!
-
-    // WebWorker 模拟：接收数据，写入 Map 缓存
-    simB.current = createSimulator((entities) => {
-      optimizedReceived.current++
-      for (const e of entities) {
-        workerCache.current.set(e.id, e) // Map 缓存，同 ID 自动覆盖
-      }
-    }, entityCount, pushSpeed)
-
-    // rAF 节流渲染
-    function optimizedRender() {
-      if (!isRunning) return
-      const now = performance.now()
-      // 每 16ms 刷新一次（60fps）
-      if (now - workerLastFlush.current >= 16) {
-        // 从 Map 取出最新状态
-        const latest: Entity[] = []
-        workerCache.current.forEach((v) => latest.push(v))
-        renderEntities(ctxB, latest)
-        setOptimizedFPS(fpsB.current.tick())
-        setOptimizedDataCount(optimizedReceived.current)
-        workerLastFlush.current = now
-      }
-      requestAnimationFrame(optimizedRender)
-    }
-    workerLastFlush.current = performance.now()
-    requestAnimationFrame(optimizedRender)
-
-    simA.current.start()
-    simB.current.start()
-  }, [isRunning, entityCount, pushSpeed])
-
-  const stopSimulation = useCallback(() => {
-    setIsRunning(false)
-    simA.current?.stop()
-    simB.current?.stop()
-  }, [])
-
-  // 清理
   useEffect(() => {
-    return () => {
-      simA.current?.stop()
-      simB.current?.stop()
+    const m = mapRef.current; if (!m) return
+    const exist = new Set(mk.current.keys()), want = new Set(entities.map(e => e.id))
+    for (const id of exist) { if (!want.has(id)) { mk.current.get(id)?.remove(); mk.current.delete(id) } }
+    for (const e of entities) {
+      let marker = mk.current.get(e.id)
+      if (marker) {
+        marker.setLatLng([e.lat, e.lng])
+        const el = marker.getElement(); if (el) { const d = el.querySelector('div'); if (d) d.style.transform = `translate(-50%,-50%) rotate(${e.heading}deg)` }
+      } else {
+        marker = L.marker([e.lat, e.lng], { icon: milIcon(e.icon) }).addTo(m)
+        marker.bindTooltip(`${e.type}-${e.id}`, { direction: 'top', offset: [0, -15] })
+        mk.current.set(e.id, marker)
+      }
     }
+    fps.current.tick()
+  }, [entities])
+  return <Init />
+}
+
+// ========== 优化渲染地图 ==========
+function OptimizedMap({ entities, fps }: { entities: Entity[]; fps: React.MutableRefObject<FPS> }) {
+  const mapRef = useRef<L.Map | null>(null)
+  const mk = useRef<Map<number, L.Marker>>(new Map())
+  const cache = useRef<Map<number, Entity>>(new Map())
+  const lastFlush = useRef(0); const rafId = useRef(0)
+  function Init() { const m = useMap(); useEffect(() => { mapRef.current = m }, [m]); return null }
+
+  useEffect(() => { for (const e of entities) cache.current.set(e.id, { ...e }) }, [entities])
+
+  useEffect(() => {
+    const m = mapRef.current; if (!m) return
+    function flush() {
+      const now = performance.now()
+      if (now - lastFlush.current < 16) { rafId.current = requestAnimationFrame(flush); return }
+      lastFlush.current = now
+      const c = cache.current; const exist = new Set(mk.current.keys()); const want = new Set(c.keys())
+      for (const id of exist) { if (!want.has(id)) { mk.current.get(id)?.remove(); mk.current.delete(id) } }
+      c.forEach((e, id) => {
+        let marker = mk.current.get(id)
+        if (marker) {
+          marker.setLatLng([e.lat, e.lng])
+          const el = marker.getElement(); if (el) { const d = el.querySelector('div'); if (d) d.style.transform = `translate(-50%,-50%) rotate(${e.heading}deg)` }
+        } else {
+          marker = L.marker([e.lat, e.lng], { icon: milIcon(e.icon) }).addTo(m)
+          marker.bindTooltip(`${e.type}-${e.id}`, { direction: 'top', offset: [0, -15] })
+          mk.current.set(id, marker)
+        }
+      })
+      fps.current.tick()
+      rafId.current = requestAnimationFrame(flush)
+    }
+    rafId.current = requestAnimationFrame(flush)
+    return () => cancelAnimationFrame(rafId.current)
   }, [])
+  return <Init />
+}
+
+// ========== App ==========
+export default function App() {
+  const [ea, setEa] = useState<Entity[]>([])
+  const [eb, setEb] = useState<Entity[]>([])
+  const [fpsA, setFpsA] = useState(0); const [fpsB, setFpsB] = useState(0)
+  const [cntA, setCntA] = useState(0); const [cntB, setCntB] = useState(0)
+  const [n, setN] = useState(50); const [spd, setSpd] = useState(100)
+  const [run, setRun] = useState(false)
+  const sA = useRef<ReturnType<typeof createSim> | null>(null)
+  const sB = useRef<ReturnType<typeof createSim> | null>(null)
+  const fpsARef = useRef(new FPS()); const fpsBRef = useRef(new FPS())
+  const cA = useRef(0); const cB = useRef(0)
+
+  const start = useCallback(() => {
+    if (run) return; setRun(true)
+    fpsARef.current.reset(); fpsBRef.current.reset(); cA.current = 0; cB.current = 0
+    sA.current = createSim(es => { cA.current++; setEa(es); setCntA(cA.current) }, n, spd)
+    sB.current = createSim(es => { cB.current++; setEb(es); setCntB(cB.current) }, n, spd)
+    sA.current.start(); sB.current.start()
+    function loop() { setFpsA(fpsARef.current.f); setFpsB(fpsBRef.current.f); requestAnimationFrame(loop) }
+    requestAnimationFrame(loop)
+  }, [run, n, spd])
+
+  const stop = useCallback(() => { setRun(false); sA.current?.stop(); sB.current?.stop() }, [])
+
+  useEffect(() => () => { sA.current?.stop(); sB.current?.stop() }, [])
 
   return (
     <div className="app">
       <header className="header">
-        <h1>🖥️ 高频实时数据推送渲染方案对比</h1>
-        <p className="subtitle">
-          gRPC Streaming → WebWorker (Map 缓存 + 16ms 节流) → rAF 渲染
-        </p>
+        <h1>🖥️ 军事仿真高频数据推送渲染对比</h1>
+        <p className="subtitle">南海区域 · Leaflet 地图 · 同数据源不同渲染策略</p>
       </header>
-
-      {/* 控制面板 */}
       <div className="controls">
         <div className="control-group">
-          <label>实体数量：</label>
-          <input
-            type="range"
-            min={50}
-            max={500}
-            step={50}
-            value={entityCount}
-            onChange={(e) => setEntityCount(Number(e.target.value))}
-            disabled={isRunning}
-          />
-          <span className="value">{entityCount}</span>
+          <label>实体：</label>
+          <input type="range" min={10} max={200} step={10} value={n} onChange={e => setN(+e.target.value)} disabled={run} />
+          <span className="value">{n}</span>
         </div>
         <div className="control-group">
-          <label>推送倍速：</label>
-          <input
-            type="range"
-            min={10}
-            max={200}
-            step={10}
-            value={pushSpeed}
-            onChange={(e) => setPushSpeed(Number(e.target.value))}
-            disabled={isRunning}
-          />
-          <span className="value">{pushSpeed}x</span>
+          <label>倍速：</label>
+          <input type="range" min={10} max={200} step={10} value={spd} onChange={e => setSpd(+e.target.value)} disabled={run} />
+          <span className="value">{spd}x</span>
         </div>
-        <div className="control-group">
-          {!isRunning ? (
-            <button className="btn btn-start" onClick={startSimulation}>
-              ▶ 开始推演
-            </button>
-          ) : (
-            <button className="btn btn-stop" onClick={stopSimulation}>
-              ⏹ 停止
-            </button>
-          )}
-        </div>
+        {!run ? <button className="btn btn-start" onClick={start}>▶ 开始推演</button>
+          : <button className="btn btn-stop" onClick={stop}>⏹ 停止</button>}
       </div>
-
-      {/* 对比面板 */}
       <div className="compare-panel">
-        {/* 方案 A：直接渲染 */}
         <div className="panel panel-bad">
           <div className="panel-header bad">
-            <h2>❌ 直接渲染（无优化）</h2>
-            <div className="stats">
-              <span className="fps" style={{ color: directFPS >= 30 ? '#6bcb77' : '#ff6b6b' }}>
-                {directFPS} FPS
-              </span>
-              <span className="data-count">收到 {directDataCount} 批数据</span>
-            </div>
+            <h2>❌ 直接渲染</h2>
+            <div className="stats"><span className="fps" style={{ color: fpsA >= 20 ? '#ffd93d' : '#ff6b6b' }}>{fpsA} FPS</span><span className="data-count">{cntA} 批</span></div>
           </div>
-          <canvas ref={directCanvasRef} width={800} height={600} className="render-canvas" />
-          <div className="panel-desc">
-            <p>⚠️ 每次收到数据都立即渲染 → 主线程阻塞 → 掉帧卡顿</p>
+          <div className="map-wrapper">
+            <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}>
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <DirectMap entities={ea} fps={fpsARef} />
+            </MapContainer>
           </div>
+          <div className="panel-desc">⚠️ 每次推送立即 setLatLng → DOM 频繁操作 → 掉帧</div>
         </div>
-
-        {/* 方案 B：优化渲染 */}
         <div className="panel panel-good">
           <div className="panel-header good">
-            <h2>✅ 四层削峰（优化方案）</h2>
-            <div className="stats">
-              <span className="fps" style={{ color: optimizedFPS >= 55 ? '#6bcb77' : '#ffd93d' }}>
-                {optimizedFPS} FPS
-              </span>
-              <span className="data-count">收到 {optimizedDataCount} 批数据</span>
-            </div>
+            <h2>✅ 四层削峰</h2>
+            <div className="stats"><span className="fps" style={{ color: fpsB >= 50 ? '#6bcb77' : '#ffd93d' }}>{fpsB} FPS</span><span className="data-count">{cntB} 批</span></div>
           </div>
-          <canvas ref={optimizedCanvasRef} width={800} height={600} className="render-canvas" />
-          <div className="panel-desc">
-            <p>✅ WebWorker Map 缓存去重 + 16ms 节流 → 平滑 60fps</p>
+          <div className="map-wrapper">
+            <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}>
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <OptimizedMap entities={eb} fps={fpsBRef} />
+            </MapContainer>
           </div>
+          <div className="panel-desc">✅ Map 缓存去重 + 16ms 节流 → 平滑 60fps</div>
         </div>
       </div>
-
-      {/* 架构说明 */}
+      <div className="legend">
+        {ENTITY_TYPES.map(t => <div key={t.type} className="legend-item"><span className="legend-icon">{t.icon}</span><span>{t.type}</span><span className="legend-speed">{t.speed}节</span></div>)}
+      </div>
       <div className="architecture">
-        <h3>📐 优化方案架构</h3>
+        <h3>📐 真实项目架构</h3>
         <div className="arch-flow">
-          <div className="arch-box">模拟推送<br/><small>{entityCount}实体 × {pushSpeed}x</small></div>
-          <span className="arch-arrow">→</span>
-          <div className="arch-box highlight">WebWorker<br/><small>Map 缓存去重</small></div>
-          <span className="arch-arrow">→</span>
-          <div className="arch-box highlight">16ms 节流<br/><small>削峰 2000x</small></div>
-          <span className="arch-arrow">→</span>
-          <div className="arch-box highlight">rAF 渲染<br/><small>60fps 平滑</small></div>
+          <div className="arch-box">gRPC Streaming<small>Protobuf</small></div><span className="arch-arrow">→</span>
+          <div className="arch-box highlight">WebWorker<small>Map 去重</small></div><span className="arch-arrow">→</span>
+          <div className="arch-box highlight">16ms 节流<small>削峰2000x</small></div><span className="arch-arrow">→</span>
+          <div className="arch-box highlight">Cesium/Leaflet<small>60fps</small></div>
         </div>
       </div>
     </div>

@@ -1,223 +1,55 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a1a; color: #e0e0e0; }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0a0a1a;
-  color: #e0e0e0;
-  min-height: 100vh;
-}
+.app { max-width: 1800px; margin: 0 auto; padding: 16px; }
 
-.app {
-  max-width: 1700px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.header {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.header h1 {
-  font-size: 28px;
-  color: #ffffff;
-  margin-bottom: 8px;
-}
-
-.subtitle {
-  color: #888;
-  font-size: 14px;
-}
+.header { text-align: center; margin-bottom: 12px; }
+.header h1 { font-size: 24px; color: #fff; margin-bottom: 4px; }
+.subtitle { color: #888; font-size: 13px; }
 
 /* 控制面板 */
-.controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 30px;
-  margin-bottom: 20px;
-  padding: 16px 24px;
-  background: #12122a;
-  border-radius: 12px;
-  border: 1px solid #2a2a4a;
-}
-
-.control-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.control-group label {
-  font-size: 14px;
-  color: #aaa;
-  white-space: nowrap;
-}
-
-.control-group input[type="range"] {
-  width: 120px;
-  accent-color: #4d96ff;
-}
-
-.value {
-  font-weight: bold;
-  color: #4d96ff;
-  min-width: 40px;
-}
-
-.btn {
-  padding: 10px 24px;
-  border: none;
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-start {
-  background: #6bcb77;
-  color: #0a0a1a;
-}
-
-.btn-start:hover {
-  background: #5ab868;
-  transform: scale(1.05);
-}
-
-.btn-stop {
-  background: #ff6b6b;
-  color: #0a0a1a;
-}
-
-.btn-stop:hover {
-  background: #e55a5a;
-  transform: scale(1.05);
-}
+.controls { display: flex; align-items: center; justify-content: center; gap: 24px; margin-bottom: 12px; padding: 12px 20px; background: #12122a; border-radius: 10px; border: 1px solid #2a2a4a; }
+.control-group { display: flex; align-items: center; gap: 8px; }
+.control-group label { font-size: 13px; color: #aaa; }
+.control-group input[type="range"] { width: 100px; accent-color: #4d96ff; }
+.value { font-weight: bold; color: #4d96ff; min-width: 30px; }
+.btn { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.btn-start { background: #6bcb77; color: #0a0a1a; }
+.btn-start:hover { background: #5ab868; }
+.btn-stop { background: #ff6b6b; color: #0a0a1a; }
+.btn-stop:hover { background: #e55a5a; }
 
 /* 对比面板 */
-.compare-panel {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-bottom: 20px;
-}
+.compare-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+.panel { background: #12122a; border-radius: 10px; border: 1px solid #2a2a4a; overflow: hidden; }
+.panel-header { padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; }
+.panel-header.bad { border-bottom: 2px solid #ff6b6b; }
+.panel-header.good { border-bottom: 2px solid #6bcb77; }
+.panel-header h2 { font-size: 15px; }
+.stats { display: flex; gap: 14px; align-items: center; }
+.fps { font-size: 22px; font-weight: bold; font-variant-numeric: tabular-nums; }
+.data-count { font-size: 11px; color: #888; }
 
-.panel {
-  background: #12122a;
-  border-radius: 12px;
-  border: 1px solid #2a2a4a;
-  overflow: hidden;
-}
+.map-wrapper { height: 460px; }
+.leaflet-map { height: 100%; width: 100%; }
+/* 覆盖 Leaflet 暗色背景 */
+.leaflet-container { background: #1a2a3a !important; }
 
-.panel-header {
-  padding: 12px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+.panel-desc { padding: 8px 14px; font-size: 12px; color: #888; border-top: 1px solid #2a2a4a; }
 
-.panel-header.bad {
-  border-bottom: 2px solid #ff6b6b;
-}
+/* 图例 */
+.legend { display: flex; gap: 20px; justify-content: center; padding: 10px 16px; background: #12122a; border-radius: 10px; border: 1px solid #2a2a4a; margin-bottom: 12px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.legend-icon { font-size: 18px; }
+.legend-speed { color: #888; font-size: 11px; }
 
-.panel-header.good {
-  border-bottom: 2px solid #6bcb77;
-}
+/* 架构 */
+.architecture { background: #12122a; border-radius: 10px; border: 1px solid #2a2a4a; padding: 16px 20px; }
+.architecture h3 { font-size: 15px; margin-bottom: 12px; color: #ccc; }
+.arch-flow { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.arch-box { background: #1a1a3a; border: 1px solid #3a3a5a; border-radius: 8px; padding: 12px 20px; text-align: center; font-weight: 600; font-size: 13px; min-width: 100px; }
+.arch-box small { display: block; color: #888; font-weight: normal; margin-top: 3px; }
+.arch-box.highlight { border-color: #4d96ff; background: #1a1a4a; }
+.arch-arrow { font-size: 20px; color: #4d96ff; }
 
-.panel-header h2 {
-  font-size: 16px;
-}
-
-.stats {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-
-.fps {
-  font-size: 24px;
-  font-weight: bold;
-  font-variant-numeric: tabular-nums;
-}
-
-.data-count {
-  font-size: 12px;
-  color: #888;
-}
-
-.render-canvas {
-  width: 100%;
-  height: 400px;
-  background: #0a0a1a;
-  display: block;
-}
-
-.panel-desc {
-  padding: 10px 16px;
-  font-size: 13px;
-  color: #888;
-  border-top: 1px solid #2a2a4a;
-}
-
-/* 架构说明 */
-.architecture {
-  background: #12122a;
-  border-radius: 12px;
-  border: 1px solid #2a2a4a;
-  padding: 20px 24px;
-}
-
-.architecture h3 {
-  font-size: 16px;
-  margin-bottom: 16px;
-  color: #ccc;
-}
-
-.arch-flow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.arch-box {
-  background: #1a1a3a;
-  border: 1px solid #3a3a5a;
-  border-radius: 10px;
-  padding: 16px 24px;
-  text-align: center;
-  font-weight: 600;
-  font-size: 14px;
-  min-width: 120px;
-}
-
-.arch-box small {
-  display: block;
-  color: #888;
-  font-weight: normal;
-  margin-top: 4px;
-}
-
-.arch-box.highlight {
-  border-color: #4d96ff;
-  background: #1a1a4a;
-}
-
-.arch-arrow {
-  font-size: 24px;
-  color: #4d96ff;
-  font-weight: bold;
-}
-
-/* 响应式 */
-@media (max-width: 1100px) {
-  .compare-panel {
-    grid-template-columns: 1fr;
-  }
-}
+@media (max-width: 1100px) { .compare-panel { grid-template-columns: 1fr; } }
