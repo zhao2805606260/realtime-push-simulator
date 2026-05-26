@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
@@ -10,218 +10,156 @@ interface Entity {
   speed: number; icon: string; type: string; targetLat: number; targetLng: number
 }
 
-// ========== 军事实体定义 ==========
-const ENTITY_TYPES = [
+const TYPES = [
   { icon: '🛩️', type: '战斗机', speed: 800 },
   { icon: '🚁', type: '直升机', speed: 250 },
   { icon: '🚢', type: '驱逐舰', speed: 30 },
   { icon: '🚛', type: '装甲车', speed: 70 },
   { icon: '🎯', type: '导弹', speed: 2500 },
 ]
-
 const CENTER: [number, number] = [21.5, 118.5]
+const randPos = () => ({ lat: CENTER[0] + (Math.random() - 0.5) * 4, lng: CENTER[1] + (Math.random() - 0.5) * 5 })
+const milIcon = (e: string) => L.divIcon({ html: `<div style="font-size:22px">${e}</div>`, className: 'mil-marker', iconSize: [30,30], iconAnchor: [15,15] })
 
-function randPos() {
-  return { lat: CENTER[0] + (Math.random() - 0.5) * 4, lng: CENTER[1] + (Math.random() - 0.5) * 5 }
-}
-
-// ========== 军事实体图标 ==========
-function milIcon(emoji: string) {
-  return L.divIcon({
-    html: `<div style="font-size:22px;transform:translate(-50%,-50%)">${emoji}</div>`,
-    className: '', iconSize: [30, 30], iconAnchor: [15, 15],
-  })
-}
-
-// ========== 模拟推送 ==========
-function createSim(onPush: (es: Entity[]) => void, count: number, speedMul: number) {
-  let running = false, raf = 0
-  const es: Entity[] = []
+// ========== 引擎 ==========
+function createEngine(count: number, mul: number) {
+  const entities: Entity[] = []
   for (let i = 0; i < count; i++) {
-    const t = ENTITY_TYPES[i % ENTITY_TYPES.length]; const p = randPos()
-    es.push({ id: i, lat: p.lat, lng: p.lng, heading: 0, speed: t.speed, icon: t.icon, type: t.type, targetLat: randPos().lat, targetLng: randPos().lng })
+    const t = TYPES[i % TYPES.length], p = randPos()
+    entities.push({ id: i, lat: p.lat, lng: p.lng, heading: 0, speed: t.speed, icon: t.icon, type: t.type, targetLat: randPos().lat, targetLng: randPos().lng })
   }
+  let running = false, raf = 0
   function tick() {
     if (!running) return
-    for (let j = 0; j < speedMul; j++) {
-      for (const e of es) {
-        const dLat = e.targetLat - e.lat, dLng = e.targetLng - e.lng
-        const dist = Math.sqrt(dLat * dLat + dLng * dLng)
-        if (dist < 0.01) { const np = randPos(); e.targetLat = np.lat; e.targetLng = np.lng }
-        else {
-          const step = (e.speed * 1.852) / 111 / 3600 * 3
-          const r = Math.min(step / dist, 1)
-          e.lat += dLat * r; e.lng += dLng * r
-          e.heading = (Math.atan2(dLng, dLat) * 180) / Math.PI
-        }
-      }
+    for (let j = 0; j < mul; j++) for (const e of entities) {
+      const dLat = e.targetLat - e.lat, dLng = e.targetLng - e.lng, dist = Math.sqrt(dLat * dLat + dLng * dLng)
+      if (dist < 0.01) { const np = randPos(); e.targetLat = np.lat; e.targetLng = np.lng }
+      else { const r = Math.min((e.speed * 1.852) / 111 / 3600 * 3 / dist, 1); e.lat += dLat * r; e.lng += dLng * r; e.heading = (Math.atan2(dLng, dLat) * 180) / Math.PI }
     }
-    onPush(es.map(e => ({ ...e })))
     raf = requestAnimationFrame(tick)
   }
-  return {
-    start() { running = true; raf = requestAnimationFrame(tick) },
-    stop() { running = false; cancelAnimationFrame(raf) },
-  }
+  return { entities, start() { running = true; raf = requestAnimationFrame(tick) }, stop() { running = false; cancelAnimationFrame(raf) }, getSnapshot: () => entities.map(e => ({ ...e })) }
 }
 
 // ========== FPS ==========
-class FPS { f = 0; private c = 0; private t = performance.now()
-  tick() { this.c++; const n = performance.now(); if (n - this.t >= 1000) { this.f = this.c; this.c = 0; this.t = n } return this.f }
-  reset() { this.f = 0; this.c = 0; this.t = performance.now() }
+class FPS { v = 0; private c = 0; private t = performance.now()
+  tick() { this.c++; const n = performance.now(); if (n - this.t >= 1000) { this.v = this.c; this.c = 0; this.t = n } return this.v }
+  reset() { this.v = 0; this.c = 0; this.t = performance.now() }
 }
 
-// ========== 直接渲染地图 ==========
-function DirectMap({ entities, fps }: { entities: Entity[]; fps: React.MutableRefObject<FPS> }) {
+// ========== 左侧：直接渲染 — 每帧强制 React re-render + 全量 setLatLng ==========
+function DirectMap({ engine }: { engine: ReturnType<typeof createEngine> }) {
   const mapRef = useRef<L.Map | null>(null)
   const mk = useRef<Map<number, L.Marker>>(new Map())
+  const fps = useRef(new FPS())
+  const [, rr] = useState(0)
+  const fpsSpan = useRef<HTMLSpanElement | null>(null)
+
   function Init() { const m = useMap(); useEffect(() => { mapRef.current = m }, [m]); return null }
 
   useEffect(() => {
     const m = mapRef.current; if (!m) return
-    const exist = new Set(mk.current.keys()), want = new Set(entities.map(e => e.id))
-    for (const id of exist) { if (!want.has(id)) { mk.current.get(id)?.remove(); mk.current.delete(id) } }
-    for (const e of entities) {
-      let marker = mk.current.get(e.id)
-      if (marker) {
-        marker.setLatLng([e.lat, e.lng])
-        const el = marker.getElement(); if (el) { const d = el.querySelector('div'); if (d) d.style.transform = `translate(-50%,-50%) rotate(${e.heading}deg)` }
-      } else {
-        marker = L.marker([e.lat, e.lng], { icon: milIcon(e.icon) }).addTo(m)
-        marker.bindTooltip(`${e.type}-${e.id}`, { direction: 'top', offset: [0, -15] })
-        mk.current.set(e.id, marker)
+    const loop = () => {
+      const snap = engine.getSnapshot()
+      const exist = new Set(mk.current.keys()), want = new Set(snap.map(e => e.id))
+      for (const id of exist) { if (!want.has(id)) { mk.current.get(id)?.remove(); mk.current.delete(id) } }
+      for (const e of snap) {
+        let marker = mk.current.get(e.id)
+        if (marker) marker.setLatLng([e.lat, e.lng])
+        else { marker = L.marker([e.lat, e.lng], { icon: milIcon(e.icon) }).addTo(m); mk.current.set(e.id, marker) }
       }
+      fps.current.tick()
+      if (fpsSpan.current) fpsSpan.current.textContent = fps.current.v + ' FPS'
+      rr(n => n + 1) // 每帧强制 re-render
+      requestAnimationFrame(loop)
     }
-    fps.current.tick()
-  }, [entities])
-  return <Init />
+    requestAnimationFrame(loop)
+  }, [])
+  return <><Init /><div className="fps-overlay bad"><span ref={fpsSpan}>0 FPS</span></div></>
 }
 
-// ========== 优化渲染地图 ==========
-function OptimizedMap({ entities, fps }: { entities: Entity[]; fps: React.MutableRefObject<FPS> }) {
+// ========== 右侧：优化 — Map 缓存 + 16ms 节流，完全绕过 React ==========
+function OptimizedMap({ engine }: { engine: ReturnType<typeof createEngine> }) {
   const mapRef = useRef<L.Map | null>(null)
   const mk = useRef<Map<number, L.Marker>>(new Map())
   const cache = useRef<Map<number, Entity>>(new Map())
-  const lastFlush = useRef(0); const rafId = useRef(0)
-  function Init() { const m = useMap(); useEffect(() => { mapRef.current = m }, [m]); return null }
+  const fps = useRef(new FPS())
+  const last = useRef(0)
+  const pushCnt = useRef(0)
+  const fpsSpan = useRef<HTMLSpanElement | null>(null)
+  const pushSpan = useRef<HTMLSpanElement | null>(null)
 
-  useEffect(() => { for (const e of entities) cache.current.set(e.id, { ...e }) }, [entities])
+  function Init() { const m = useMap(); useEffect(() => { mapRef.current = m }, [m]); return null }
 
   useEffect(() => {
     const m = mapRef.current; if (!m) return
-    function flush() {
-      const now = performance.now()
-      if (now - lastFlush.current < 16) { rafId.current = requestAnimationFrame(flush); return }
-      lastFlush.current = now
-      const c = cache.current; const exist = new Set(mk.current.keys()); const want = new Set(c.keys())
-      for (const id of exist) { if (!want.has(id)) { mk.current.get(id)?.remove(); mk.current.delete(id) } }
-      c.forEach((e, id) => {
-        let marker = mk.current.get(id)
-        if (marker) {
-          marker.setLatLng([e.lat, e.lng])
-          const el = marker.getElement(); if (el) { const d = el.querySelector('div'); if (d) d.style.transform = `translate(-50%,-50%) rotate(${e.heading}deg)` }
-        } else {
-          marker = L.marker([e.lat, e.lng], { icon: milIcon(e.icon) }).addTo(m)
-          marker.bindTooltip(`${e.type}-${e.id}`, { direction: 'top', offset: [0, -15] })
-          mk.current.set(id, marker)
-        }
-      })
-      fps.current.tick()
-      rafId.current = requestAnimationFrame(flush)
+
+    // 线程1：高频读引擎 → 写缓存
+    const reader = () => {
+      const snap = engine.getSnapshot(); pushCnt.current++
+      for (const e of snap) cache.current.set(e.id, e)
+      if (pushSpan.current) pushSpan.current.textContent = `收 ${pushCnt.current} 批`
+      requestAnimationFrame(reader)
     }
-    rafId.current = requestAnimationFrame(flush)
-    return () => cancelAnimationFrame(rafId.current)
+    requestAnimationFrame(reader)
+
+    // 线程2：每 16ms 从缓存取最新 → 更新 marker
+    const flusher = () => {
+      const now = performance.now()
+      if (now - last.current >= 16) {
+        last.current = now
+        const c = cache.current; const exist = new Set(mk.current.keys()), want = new Set(c.keys())
+        for (const id of exist) { if (!want.has(id)) { mk.current.get(id)?.remove(); mk.current.delete(id) } }
+        c.forEach((e, id) => {
+          let marker = mk.current.get(id)
+          if (marker) marker.setLatLng([e.lat, e.lng])
+          else { marker = L.marker([e.lat, e.lng], { icon: milIcon(e.icon) }).addTo(m); mk.current.set(id, marker) }
+        })
+        fps.current.tick()
+        if (fpsSpan.current) fpsSpan.current.textContent = fps.current.v + ' FPS'
+      }
+      requestAnimationFrame(flusher)
+    }
+    requestAnimationFrame(flusher)
   }, [])
-  return <Init />
+  return <><Init /><div className="fps-overlay good"><span ref={fpsSpan}>0 FPS</span><span className="push-count" ref={pushSpan}>收 0 批</span></div></>
 }
 
 // ========== App ==========
 export default function App() {
-  const [ea, setEa] = useState<Entity[]>([])
-  const [eb, setEb] = useState<Entity[]>([])
-  const [fpsA, setFpsA] = useState(0); const [fpsB, setFpsB] = useState(0)
-  const [cntA, setCntA] = useState(0); const [cntB, setCntB] = useState(0)
-  const [n, setN] = useState(50); const [spd, setSpd] = useState(100)
-  const [run, setRun] = useState(false)
-  const sA = useRef<ReturnType<typeof createSim> | null>(null)
-  const sB = useRef<ReturnType<typeof createSim> | null>(null)
-  const fpsARef = useRef(new FPS()); const fpsBRef = useRef(new FPS())
-  const cA = useRef(0); const cB = useRef(0)
+  const [n, setN] = useState(50); const [spd, setSpd] = useState(100); const [run, setRun] = useState(false)
+  const eA = useRef<ReturnType<typeof createEngine> | null>(null); const eB = useRef<ReturnType<typeof createEngine> | null>(null)
 
-  const start = useCallback(() => {
-    if (run) return; setRun(true)
-    fpsARef.current.reset(); fpsBRef.current.reset(); cA.current = 0; cB.current = 0
-    sA.current = createSim(es => { cA.current++; setEa(es); setCntA(cA.current) }, n, spd)
-    sB.current = createSim(es => { cB.current++; setEb(es); setCntB(cB.current) }, n, spd)
-    sA.current.start(); sB.current.start()
-    function loop() { setFpsA(fpsARef.current.f); setFpsB(fpsBRef.current.f); requestAnimationFrame(loop) }
-    requestAnimationFrame(loop)
-  }, [run, n, spd])
-
-  const stop = useCallback(() => { setRun(false); sA.current?.stop(); sB.current?.stop() }, [])
-
-  useEffect(() => () => { sA.current?.stop(); sB.current?.stop() }, [])
+  const start = useCallback(() => { if (run) return; setRun(true); eA.current = createEngine(n, spd); eB.current = createEngine(n, spd); eA.current.start(); eB.current.start() }, [run, n, spd])
+  const stop = useCallback(() => { setRun(false); eA.current?.stop(); eB.current?.stop() }, [])
+  useEffect(() => () => { eA.current?.stop(); eB.current?.stop() }, [])
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>🖥️ 军事仿真高频数据推送渲染对比</h1>
-        <p className="subtitle">南海区域 · Leaflet 地图 · 同数据源不同渲染策略</p>
-      </header>
+      <header className="header"><h1>🖥️ 军事仿真高频数据推送渲染对比</h1><p className="subtitle">南海区域 · {n}实体 × {spd}x · 同一引擎不同渲染策略</p></header>
       <div className="controls">
-        <div className="control-group">
-          <label>实体：</label>
-          <input type="range" min={10} max={200} step={10} value={n} onChange={e => setN(+e.target.value)} disabled={run} />
-          <span className="value">{n}</span>
-        </div>
-        <div className="control-group">
-          <label>倍速：</label>
-          <input type="range" min={10} max={200} step={10} value={spd} onChange={e => setSpd(+e.target.value)} disabled={run} />
-          <span className="value">{spd}x</span>
-        </div>
-        {!run ? <button className="btn btn-start" onClick={start}>▶ 开始推演</button>
-          : <button className="btn btn-stop" onClick={stop}>⏹ 停止</button>}
+        <div className="control-group"><label>实体：</label><input type="range" min={10} max={200} step={10} value={n} onChange={e => setN(+e.target.value)} disabled={run} /><span className="value">{n}</span></div>
+        <div className="control-group"><label>倍速：</label><input type="range" min={10} max={200} step={10} value={spd} onChange={e => setSpd(+e.target.value)} disabled={run} /><span className="value">{spd}x</span></div>
+        {!run ? <button className="btn btn-start" onClick={start}>▶ 开始推演</button> : <button className="btn btn-stop" onClick={stop}>⏹ 停止</button>}
       </div>
       <div className="compare-panel">
         <div className="panel panel-bad">
-          <div className="panel-header bad">
-            <h2>❌ 直接渲染</h2>
-            <div className="stats"><span className="fps" style={{ color: fpsA >= 20 ? '#ffd93d' : '#ff6b6b' }}>{fpsA} FPS</span><span className="data-count">{cntA} 批</span></div>
-          </div>
+          <div className="panel-header bad"><h2>❌ 直接渲染</h2><span className="desc-text">每帧 setLatLng 全量更新 + React re-render</span></div>
           <div className="map-wrapper">
-            <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}>
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              <DirectMap entities={ea} fps={fpsARef} />
-            </MapContainer>
+            {run && eA.current ? <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}><TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" /><DirectMap engine={eA.current} /></MapContainer>
+              : <div className="map-placeholder">点击「开始推演」启动</div>}
           </div>
-          <div className="panel-desc">⚠️ 每次推送立即 setLatLng → DOM 频繁操作 → 掉帧</div>
         </div>
         <div className="panel panel-good">
-          <div className="panel-header good">
-            <h2>✅ 四层削峰</h2>
-            <div className="stats"><span className="fps" style={{ color: fpsB >= 50 ? '#6bcb77' : '#ffd93d' }}>{fpsB} FPS</span><span className="data-count">{cntB} 批</span></div>
-          </div>
+          <div className="panel-header good"><h2>✅ 四层削峰</h2><span className="desc-text">Map 缓存 + 16ms 节流 · 完全绕过 React</span></div>
           <div className="map-wrapper">
-            <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}>
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              <OptimizedMap entities={eb} fps={fpsBRef} />
-            </MapContainer>
+            {run && eB.current ? <MapContainer center={CENTER} zoom={8} className="leaflet-map" zoomControl={false} attributionControl={false}><TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" /><OptimizedMap engine={eB.current} /></MapContainer>
+              : <div className="map-placeholder">点击「开始推演」启动</div>}
           </div>
-          <div className="panel-desc">✅ Map 缓存去重 + 16ms 节流 → 平滑 60fps</div>
         </div>
       </div>
-      <div className="legend">
-        {ENTITY_TYPES.map(t => <div key={t.type} className="legend-item"><span className="legend-icon">{t.icon}</span><span>{t.type}</span><span className="legend-speed">{t.speed}节</span></div>)}
-      </div>
-      <div className="architecture">
-        <h3>📐 真实项目架构</h3>
-        <div className="arch-flow">
-          <div className="arch-box">gRPC Streaming<small>Protobuf</small></div><span className="arch-arrow">→</span>
-          <div className="arch-box highlight">WebWorker<small>Map 去重</small></div><span className="arch-arrow">→</span>
-          <div className="arch-box highlight">16ms 节流<small>削峰2000x</small></div><span className="arch-arrow">→</span>
-          <div className="arch-box highlight">Cesium/Leaflet<small>60fps</small></div>
-        </div>
-      </div>
+      <div className="legend">{TYPES.map(t => <div key={t.type} className="legend-item"><span className="legend-icon">{t.icon}</span><span>{t.type}</span><span className="legend-speed">{t.speed}节</span></div>)}</div>
+      <div className="architecture"><h3>📐 两侧差异</h3><div className="arch-flow"><div className="arch-box bad-box">左侧<small>每帧React re-render<br/>+全量setLatLng</small></div><span className="arch-arrow">vs</span><div className="arch-box good-box">右侧<small>Map缓存写入<br/>16ms刷新到Marker<br/>0次React re-render</small></div></div></div>
     </div>
   )
 }
