@@ -21,19 +21,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .map-wrapper{height:440px;position:relative}
 .leaflet-map{height:100%;width:100%}.leaflet-container{background:#1a2a3a!important}
 .map-placeholder{display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:16px}
-.fps-overlay{position:absolute;bottom:44px;right:8px;z-index:1000;padding:4px 10px;border-radius:6px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:10px;pointer-events:none}
+
+.fps-overlay{position:absolute;bottom:48px;right:8px;z-index:1000;padding:4px 10px;border-radius:6px;font-size:18px;font-weight:700;display:flex;flex-direction:column;align-items:flex-end;gap:2px;pointer-events:none}
 .fps-overlay.bad{background:rgba(255,107,107,.85);color:#fff}
 .fps-overlay.good{background:rgba(107,203,119,.85);color:#fff}
-.push-count{font-size:11px;font-weight:400}
+.push-count,.thread-info{font-size:10px;font-weight:400;opacity:.85}
+
 .legend{display:flex;gap:16px;justify-content:center;padding:8px 14px;background:#12122a;border-radius:8px;border:1px solid #2a2a4a;margin-bottom:10px}
 .legend-item{display:flex;align-items:center;gap:5px;font-size:12px}
 .legend-icon{font-size:16px}.legend-speed{color:#888;font-size:10px}
+
 .architecture{background:#12122a;border-radius:8px;border:1px solid #2a2a4a;padding:14px 18px}
 .architecture h3{font-size:14px;margin-bottom:10px;color:#ccc}
 .arch-flow{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
 .arch-box{padding:10px 16px;border-radius:6px;text-align:center;font-weight:600;font-size:13px;min-width:90px}
 .arch-box small{display:block;color:#888;font-weight:400;margin-top:2px;font-size:11px}
-.arch-box.bad-box{border:1px solid #ff6b6b;background:#1a1010}.arch-box.good-box{border:1px solid #6bcb77;background:#101a10}
+.arch-box.bad-box{border:1px solid #ff6b6b;background:#1a1010}
+.arch-box.good-box{border:1px solid #6bcb77;background:#101a10}
 .arch-arrow{font-size:16px;color:#4d96ff}
 .mil-marker{background:0!important;border:0!important}
 @media(max-width:1100px){.compare-panel{grid-template-columns:1fr}}
